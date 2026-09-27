@@ -1,10 +1,12 @@
 [Unit]
 Description=AutoSSH tunnel to <%= $remote_host %> for <%= $proxy_name %>
 After=network-online.target
+Wants=network-online.target
 
 [Service]
-User=root
-ExecStart=/usr/bin/autossh -M <%= $monit_port %> -N -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" -o "StrictHostKeyChecking no" <%= $port_bindings %> autossh@<%= $remote_host %> -i <%= $identity_file %>
+User=autossh
+# Local port bindings below 1024 require root; autossh intentionally runs as autossh.
+ExecStart=/usr/bin/autossh -M <%= $monit_port %> -N -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" <%= $host_key_options %> <%= $port_bindings %> autossh@<%= $remote_host %> -i <%= $identity_file %>
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=10

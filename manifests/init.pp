@@ -15,7 +15,15 @@ class autossh (
   }
   ssh_keygen { 'autossh':
     filename => $ssh_filename,
-    comment => "puppet_autossh_%{facts.hostname}",
+    comment  => "puppet_autossh_${facts['hostname']}",
+    user     => 'autossh',
+    require  => Accounts::User['autossh'], # creates ~/.ssh (managehome)
+  }
+  file { '/home/autossh/.ssh/known_hosts':
+    ensure  => file,
+    owner   => 'autossh',
+    mode    => '0644',
+    require => Accounts::User['autossh'],
   }
   $config = lookup('autossh::config', Hash, 'deep', {})
   $config.each |String $proxy_name, Hash $proxy_config| {
@@ -36,14 +44,31 @@ class autossh (
       "-${flag} ${config['remote_port']}:localhost:${config['local_port']}"
     }.join(' ')
 
+    $host_key = $proxy_config['host_key']
+    $host_key_options = $host_key ? {
+      undef   => '-o StrictHostKeyChecking=accept-new',
+      default => '-o StrictHostKeyChecking=yes',
+    }
+
+    if $host_key and !defined(Sshkey[$proxy_config['remote_host']]) {
+      sshkey { $proxy_config['remote_host']:
+        ensure  => present,
+        type    => $host_key['type'],
+        key     => $host_key['key'],
+        target  => '/home/autossh/.ssh/known_hosts',
+        require => File['/home/autossh/.ssh/known_hosts'],
+      }
+    }
+
     file { "/etc/systemd/system/${proxy_name}.service":
       ensure  => file,
       content => epp("${module_name}/autossh_conf.epp", {
-          'proxy_name'    => $proxy_name,
-          'monit_port'    => $monit_port,
-          'identity_file' => $ssh_filename,
-          'port_bindings' => $port_bindings,
-          'remote_host'   => $proxy_config['remote_host'],
+          'proxy_name'       => $proxy_name,
+          'monit_port'       => $monit_port,
+          'identity_file'    => $ssh_filename,
+          'port_bindings'    => $port_bindings,
+          'remote_host'      => $proxy_config['remote_host'],
+          'host_key_options' => "-o UserKnownHostsFile=/home/autossh/.ssh/known_hosts ${host_key_options}",
       }),
       owner   => 'root',
       group   => 'root',
@@ -62,6 +87,7 @@ class autossh (
       require   => [
         File["/etc/systemd/system/${proxy_name}.service"],
         Exec["systemd-reload-${proxy_name}"],
+        Ssh_keygen['autossh'],
       ],
     }
   }
